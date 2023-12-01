@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'detect_cam = yolov5_ros2.detect_cam:main',
         ],
     },
 )
