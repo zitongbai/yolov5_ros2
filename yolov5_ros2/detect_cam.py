@@ -4,9 +4,10 @@ from rclpy.node import Node
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import CameraInfo
-from vision_msgs.msg import Detection2DArray
+from vision_msgs.msg import Detection2DArray, Detection2D, ObjectHypothesisWithPose
 import cv2
 from cv_bridge import CvBridge, CvBridgeError
+import numpy as np
 
 # address path 
 import os
@@ -27,7 +28,7 @@ from ultralytics.utils.plotting import Annotator, colors
 from .yolov5.models.common import DetectMultiBackend
 from .yolov5.utils.torch_utils import select_device
 from .yolov5.utils.general import check_img_size, check_imshow, non_max_suppression, scale_boxes
-
+from .yolov5.utils.augmentations import letterbox
 
 class YoloV5ROS2(Node):
     def __init__(self):
@@ -46,7 +47,8 @@ class YoloV5ROS2(Node):
             self.get_logger().info('waiting for image info', throttle_duration_sec=1)
             rclpy.spin_once(self)
         self.destroy_subscription(self.image_info_sub) # we only need to sub camera info once
-        
+        self.detection_pub = self.create_publisher(Detection2DArray, '/detections', 10)
+        self.detection_result = Detection2DArray()
         # load yolov5 model
         self.half = False
         device = select_device('0') # use gpu 0
@@ -70,7 +72,10 @@ class YoloV5ROS2(Node):
     def image_callback(self, msg:Image):
         img = self.bridge.imgmsg_to_cv2(msg, desired_encoding= 'bgr8') # HWC
         img0 = img.copy() # for visualization
+        # Padded resize
+        img = letterbox(img, new_shape=self.imgsz, stride=self.stride, auto=self.pt)[0]
         img = img.transpose(2, 0, 1) # HWC to CHW
+        img = np.ascontiguousarray(img) # contiguous array for memory efficiency
         # convert to torch gpu
         img = torch.from_numpy(img).to(self.model.device)
         img = img.half() if self.half else img.float()
@@ -97,14 +102,36 @@ class YoloV5ROS2(Node):
             # self.get_logger().info(f'img shape={img.shape}, img0 shape={img0.shape}', throttle_duration_sec=1)
             # annotate results
             for *xyxy, conf, cls in reversed(det):
+                # add to detection result msg
+                detection = Detection2D()
+                detection.id = self.names[int(cls)]
+                x1, y1, x2, y2 = int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])
+                detection.bbox.center.position.x = (x1 + x2) / 2.0
+                detection.bbox.center.position.y = (y1 + y2) / 2.0
+                detection.bbox.size_x = float(x2 - x1)
+                detection.bbox.size_y = float(y2 - y1)
+                obj_hypothesis = ObjectHypothesisWithPose()
+                obj_hypothesis.hypothesis.class_id = self.names[int(cls)]
+                obj_hypothesis.hypothesis.score = float(conf)
+
+                # TODO: add pose info in obj_hypothesis
+
+                detection.results.append(obj_hypothesis)
+                self.detection_result.detections.append(detection)
+
                 if self.view_img:
                     c = int(cls)
                     label = f'{self.names[c]} {conf:.2f}'
                     annotator.box_label(xyxy, label, color=colors(c, True))
-        img0 = annotator.result()
+        
         if self.view_img:
+            img0 = annotator.result()
+            cv2.namedWindow('yolov5_ros2', cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO) # allow window resize (Linux)
+            cv2.resizeWindow('yolov5_ros2', img0.shape[1], img0.shape[0])
             cv2.imshow('yolov5_ros2', img0)
             cv2.waitKey(1)
+        
+        self.detection_pub.publish(self.detection_result)
                         
 
 def main(args=None):
