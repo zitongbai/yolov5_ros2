@@ -27,6 +27,8 @@ ros2 run yolov5_ros2 detect_cam
 
 you would get the image annotated
 
+<img src="./detect%20result.png" width = "500" alt="detect"/>
+
 # Acknowledge
 
 * [fishros/yolov5_ros2](https://github.com/fishros/yolov5_ros2)
