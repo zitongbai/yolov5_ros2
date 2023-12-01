@@ -6,6 +6,7 @@ download this repo
 ```shell
 git clone git@github.com:zitongbai/yolov5_ros2.git --recurse-submodules
 ```
+remember to change the path to your conda environment in `yolov5_ros2/detect_cam.py`
 
 then build the ros2 workspace
 
